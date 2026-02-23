@@ -620,8 +620,7 @@ function renderMain() {
         <div><div class="amc-info-label">Start Date</div><div class="amc-info-value">${fmtDate(c.amcStart)}</div></div>
         <div><div class="amc-info-label">End Date</div><div class="amc-info-value">${fmtDate(c.amcEnd)}</div></div>
         <div><div class="amc-info-label">RO Model</div><div class="amc-info-value">${c.roModel||'—'}</div></div>
-        <div><div class="amc-info-label">Free Services Included</div><div class="amc-info-value">${c.freeServices||'—'}</div></div>
-        <div><div class="amc-info-label">Services Completed</div><div class="amc-info-value">${(c.serviceSchedule||[]).filter(s=>s.status==='done').length} / ${(c.serviceSchedule||[]).length}</div></div>
+        <div><div class="amc-info-label">Services Completed</div><div class="amc-info-value">${(c.serviceSchedule||[]).filter(s=>s.status==='done').length} of ${(c.serviceSchedule||[]).length} scheduled</div></div>
         <div><div class="amc-info-label">Notes</div><div class="amc-info-value" style="font-family:'DM Sans';font-size:12px;">${c.notes||'—'}</div></div>
       </div>
     </div>
@@ -980,10 +979,7 @@ function customerForm(c) {
     <div class="form-group"><label>RO Model</label><input class="form-input" id="f_roModel" value="${c?.roModel||''}" placeholder="e.g. Kent Grand Plus"></div>
 
     <div id="amcFields" style="display:${isRegular?'none':'block'};">
-      <div class="form-row">
-        <div class="form-group"><label>AMC Amount (₹)</label><input class="form-input" id="f_amcAmount" type="number" value="${c?.amcAmount||''}" placeholder="5000"></div>
-        <div class="form-group"><label>Free Services Included</label><input class="form-input" id="f_freeServices" type="number" value="${c?.freeServices||2}"></div>
-      </div>
+      <div class="form-group"><label>AMC Amount (₹)</label><input class="form-input" id="f_amcAmount" type="number" value="${c?.amcAmount||''}" placeholder="5000"></div>
       <div class="form-row">
         <div class="form-group"><label>AMC Start Date</label><input class="form-input" id="f_amcStart" type="date" value="${c?.amcStart||todayStr()}"></div>
         <div class="form-group"><label>AMC End Date</label><input class="form-input" id="f_amcEnd" type="date" value="${c?.amcEnd||addYears(todayStr(),1)}"></div>
@@ -1036,7 +1032,6 @@ async function saveCustomer(id) {
     amcAmount: isRegular ? null : document.getElementById('f_amcAmount').value,
     amcStart: isRegular ? null : document.getElementById('f_amcStart').value,
     amcEnd: isRegular ? null : document.getElementById('f_amcEnd').value,
-    freeServices: isRegular ? null : document.getElementById('f_freeServices').value,
     notes: document.getElementById('f_notes').value.trim(),
     services: existing?.services || [],
     serviceSchedule: isRegular ? [] : (existing?.serviceSchedule || [])
