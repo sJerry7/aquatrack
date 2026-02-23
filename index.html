@@ -119,17 +119,7 @@
   .btn-green:hover { background:rgba(34,211,165,.22); }
 
   /* SERVICE SCHEDULE TABLE */
-  .schedule-table { width:100%; border-collapse:collapse; }
-  .schedule-table th { font-size:11px; text-transform:uppercase; letter-spacing:0.7px; color:var(--text-dim); font-family:'DM Mono',monospace; padding:10px 18px; text-align:left; border-bottom:1px solid var(--border); font-weight:500; }
-  .schedule-table td { padding:12px 18px; border-bottom:1px solid rgba(31,45,71,.5); font-size:13px; vertical-align:middle; }
-  .schedule-table tr:last-child td { border-bottom:none; }
-  .schedule-table tr:hover td { background:rgba(255,255,255,.02); }
 
-  .sched-status { font-size:10px; font-weight:700; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:0.5px; white-space:nowrap; }
-  .sched-pending { background:rgba(0,212,255,.1); color:var(--accent); }
-  .sched-due-soon { background:rgba(251,191,36,.15); color:var(--warn); }
-  .sched-overdue { background:rgba(248,113,113,.15); color:var(--loss); }
-  .sched-done { background:rgba(34,211,165,.12); color:var(--profit); }
 
   /* SERVICE HISTORY TABLE */
   .service-table { width:100%; border-collapse:collapse; }
@@ -166,21 +156,7 @@
   .remove-comp-btn { background:none; border:none; color:var(--loss); cursor:pointer; font-size:18px; padding:2px 6px; border-radius:4px; }
 
   /* SCHEDULE EDITOR */
-  .sched-rows { display:flex; flex-direction:column; gap:10px; }
-  .sched-editor-row {
-    background:var(--surface2); border:1px solid var(--border); border-radius:10px;
-    padding:14px; display:flex; flex-direction:column; gap:10px;
-  }
-  .sched-row-top { display:flex; gap:8px; align-items:center; }
-  .sched-row-num { width:26px; height:26px; border-radius:50%; background:var(--accent); color:#000; font-family:'Syne',sans-serif; font-weight:700; font-size:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
-  .sched-label-input { flex:1; }
-  .sched-timing { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  .sched-timing select, .sched-timing input[type=number] { background:var(--bg); border:1px solid var(--border); color:var(--text); border-radius:6px; padding:6px 10px; font-size:12px; outline:none; }
-  .sched-timing input[type=number] { width:70px; }
-  .sched-timing label { font-size:12px; color:var(--text-mid); }
-  .add-sched-btn { background:none; border:1px dashed var(--border); border-radius:8px; padding:10px; color:var(--text-dim); cursor:pointer; font-size:13px; width:100%; transition:all 0.15s; }
-  .add-sched-btn:hover { border-color:var(--accent); color:var(--accent); }
-  .remove-sched-btn { background:none; border:none; color:var(--loss); cursor:pointer; font-size:16px; padding:2px 5px; }
+
 
   .no-data { padding:28px; text-align:center; color:var(--text-dim); font-size:13px; }
   .progress-bar-wrap { height:6px; background:var(--border); border-radius:3px; margin-top:8px; overflow:hidden; }
@@ -242,7 +218,7 @@
   <!-- REMINDER BANNER -->
   <div id="reminderBanner">
     <div class="reminder-banner-inner">
-      <span class="reminder-banner-title">⚠️ Upcoming Services:</span>
+      <span class="reminder-banner-title">⚠️ AMC Expiring Soon:</span>
       <div class="reminder-chips" id="reminderChips"></div>
     </div>
   </div>
@@ -398,41 +374,29 @@ function showToast(msg) {
   setTimeout(() => t.remove(), 3500);
 }
 
-// Schedule status for a single schedule item
-function schedStatus(s) {
-  if (s.status === 'done') return 'done';
-  if (!s.dueDate) return 'pending';
-  const days = daysBetween(todayStr(), s.dueDate);
-  if (days < 0) return 'overdue';
-  if (days <= 7) return 'due-soon';
-  return 'pending';
-}
-
 // ============================================================
 // REMINDER BANNER
 // ============================================================
 function renderReminderBanner() {
   const banner = document.getElementById('reminderBanner');
   const chips = document.getElementById('reminderChips');
-  const reminders = [];
+  const expiring = [];
 
   (appData.customers || []).forEach(c => {
-    (c.serviceSchedule || []).forEach(s => {
-      if (s.status === 'done' || !s.dueDate) return;
-      const days = daysBetween(todayStr(), s.dueDate);
-      if (days >= 0 && days <= 7) reminders.push({ c, s, days });
-    });
+    if (c.customerType === 'regular' || !c.amcEnd) return;
+    const days = daysBetween(todayStr(), c.amcEnd);
+    if (days >= 0 && days <= 7) expiring.push({ c, days });
   });
 
-  if (reminders.length === 0) { banner.style.display = 'none'; return; }
+  if (expiring.length === 0) { banner.style.display = 'none'; return; }
   banner.style.display = 'block';
 
-  chips.innerHTML = reminders.map(({c, s, days}) => {
+  chips.innerHTML = expiring.map(({c, days}) => {
     const label = days === 0 ? 'TODAY' : `in ${days}d`;
     return `<span class="reminder-chip" onclick="selectCustomer(${c.id})">
       <span>${c.name}</span>
       <span>·</span>
-      <span>${s.label}</span>
+      <span>AMC ends ${fmtDate(c.amcEnd)}</span>
       <span class="days">⏰ ${label}</span>
     </span>`;
   }).join('');
@@ -477,18 +441,12 @@ function renderSidebar() {
     const badgeClass = st==='active'?'badge-active':st==='expired'?'badge-expired':'badge-expiring';
     const daysLeft = c.amcEnd ? Math.max(0, daysBetween(todayStr(), c.amcEnd)) : null;
     const badgeText = st==='expiring'?`Expiring in ${daysLeft}d`:st.charAt(0).toUpperCase()+st.slice(1);
-    const hasDueSoon = (c.serviceSchedule||[]).some(s => {
-      if (s.status==='done'||!s.dueDate) return false;
-      return daysBetween(todayStr(), s.dueDate) <= 7;
-    });
-
     return `<div class="customer-item ${selectedCustomerId===c.id?'active':''}" onclick="selectCustomer(${c.id})">
       <div class="c-name">${c.name}</div>
       <div class="c-meta">${c.phone?'📞 '+c.phone:''}</div>
       <div class="c-badges">
         <span class="c-badge badge-amc" style="background:rgba(0,212,255,.1);color:var(--accent);">🔵 AMC</span>
         <span class="c-badge ${badgeClass}">${badgeText}</span>
-        ${hasDueSoon?'<span class="c-badge badge-reminder">⚠️ Service Due</span>':''}
       </div>
     </div>`;
   }).join('');
@@ -601,181 +559,7 @@ function renderMain() {
 }
 
 // ============================================================
-// MARK SCHEDULE DONE
-// ============================================================
-async function markDone(customerId, scheduleId) {
-  const doneDate = prompt('Enter done date (YYYY-MM-DD):', todayStr());
-  if (!doneDate) return;
-  try {
-    setSyncStatus('loading', '⏳ Saving...');
-    const result = await apiCall('markScheduleDone', { customerId, scheduleId, doneDate });
-    // Update local state
-    const c = appData.customers.find(x => x.id === customerId);
-    c.serviceSchedule = result.customer.serviceSchedule;
-    setSyncStatus('ok', '✅ Synced');
-    showToast('✅ Service marked done. Next service due date auto-calculated!');
-    renderMain();
-    renderSidebar();
-    renderReminderBanner();
-  } catch(e) {
-    setSyncStatus('err', '❌ Error');
-    showToast('Error: ' + e.message);
-  }
-}
-
-// ============================================================
-// SCHEDULE EDITOR MODAL
-// ============================================================
-function openScheduleEditor(customerId) {
-  const c = appData.customers.find(x => x.id === customerId);
-  const schedule = c.serviceSchedule || [];
-
-  openModal(`
-    <h3>📅 Service Schedule — ${c.name}</h3>
-    <p style="color:var(--text-mid);font-size:13px;margin-bottom:16px;">Define when each free service should happen. The app will remind you 7 days before each one.</p>
-    <div class="sched-rows" id="schedRows">
-      ${schedule.map((s, idx) => schedRowHtml(s, idx)).join('')}
-    </div>
-    <button class="add-sched-btn" onclick="addSchedRow()">+ Add Service Slot</button>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-accent" id="saveSchedBtn" onclick="saveSchedule(${customerId})">💾 Save Schedule</button>
-    </div>`);
-}
-
-function schedRowHtml(s, idx) {
-  const isAfterPrev = s ? s.afterPrevious : false;
-  const isFixedDate = s ? !!s.fixedDate : false;
-  const rowId = (s && s.id) ? s.id : uid();
-  const label = (s && s.label) ? s.label : '';
-  const monthsFromStart = (s && s.monthsFromStart) ? s.monthsFromStart : 3;
-  const monthsAfterPrev = (s && s.monthsAfterPrevious) ? s.monthsAfterPrevious : 4;
-  const fixedDateVal = (s && s.fixedDate) ? s.fixedDate : todayStr();
-  const isDone = s && s.status === 'done';
-
-  let timingMode = 'fromStart';
-  if (isAfterPrev) timingMode = 'afterPrev';
-  if (isFixedDate) timingMode = 'fixedDate';
-
-  const timingValHtml = timingMode === 'fixedDate'
-    ? `<input type="date" value="${fixedDateVal}" style="background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 10px;font-size:12px;outline:none;">`
-    : timingMode === 'afterPrev'
-    ? `<input type="number" min="0" max="24" value="${monthsAfterPrev}" style="width:60px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;outline:none;"> <label style="font-size:12px;color:var(--text-mid);">months after prev done</label>`
-    : `<input type="number" min="0" max="24" value="${monthsFromStart}" style="width:60px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;outline:none;"> <label style="font-size:12px;color:var(--text-mid);">months from AMC start</label>`;
-
-  return `<div class="sched-editor-row" data-sched-id="${rowId}">
-    <div class="sched-row-top">
-      <div class="sched-row-num">${idx+1}</div>
-      <input class="form-input sched-label-input" placeholder="Label e.g. First Free Service" value="${label}">
-      <button class="remove-sched-btn" onclick="this.closest('.sched-editor-row').remove(); renumberSchedRows();">×</button>
-    </div>
-    <div class="sched-timing">
-      <label style="font-size:12px;color:var(--text-mid);">Timing:</label>
-      <select onchange="toggleTimingMode(this)" style="background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 10px;font-size:12px;outline:none;">
-        <option value="fromStart" ${timingMode==='fromStart' ? 'selected' : ''}>Months from AMC Start</option>
-        <option value="afterPrev" ${timingMode==='afterPrev' ? 'selected' : ''}>Months after Previous Done</option>
-        <option value="fixedDate" ${timingMode==='fixedDate' ? 'selected' : ''}>📅 Pick Exact Date</option>
-      </select>
-      <div class="timing-val" style="display:flex;align-items:center;gap:8px;">${timingValHtml}</div>
-    </div>
-    ${isDone ? `<div style="font-size:12px;color:var(--profit);margin-top:6px;">✅ Completed on ${fmtDate(s.doneDate)}</div>` : ''}
-  </div>`;
-}
-
-function toggleTimingMode(sel) {
-  const row = sel.closest('.sched-editor-row');
-  const valDiv = row.querySelector('.timing-val');
-  if (sel.value === 'fromStart') {
-    valDiv.innerHTML = `<input type="number" min="0" max="24" value="3" style="width:60px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;outline:none;"> <label style="font-size:12px;color:var(--text-mid);">months from AMC start</label>`;
-  } else if (sel.value === 'afterPrev') {
-    valDiv.innerHTML = `<input type="number" min="0" max="24" value="4" style="width:60px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;outline:none;"> <label style="font-size:12px;color:var(--text-mid);">months after prev done</label>`;
-  } else {
-    valDiv.innerHTML = `<input type="date" value="${todayStr()}" style="background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 10px;font-size:12px;outline:none;">`;
-  }
-}
-
-function addSchedRow() {
-  const rows = document.getElementById('schedRows');
-  const idx = rows.children.length;
-  const wrapper = document.createElement('div');
-  wrapper.innerHTML = schedRowHtml(null, idx);
-  rows.appendChild(wrapper.firstElementChild);
-  renumberSchedRows();
-}
-
-function renumberSchedRows() {
-  document.querySelectorAll('.sched-editor-row').forEach((row, idx) => {
-    row.querySelector('.sched-row-num').textContent = idx + 1;
-  });
-}
-
-async function saveSchedule(customerId) {
-  const c = appData.customers.find(x => x.id === customerId);
-  const existingSchedule = c.serviceSchedule || [];
-  const rows = document.querySelectorAll('.sched-editor-row');
-  const newSchedule = [];
-
-  rows.forEach((row, idx) => {
-    const id = row.dataset.schedId;
-    const label = row.querySelector('.sched-label-input').value.trim() || `Service ${idx+1}`;
-    const timingSelect = row.querySelector('select');
-    const timingMode = timingSelect.value; // 'fromStart', 'afterPrev', 'fixedDate'
-    const numInput = row.querySelector('input[type=number]');
-    const dateInput = row.querySelector('input[type=date]');
-    const val = parseInt(numInput?.value || 3);
-    const afterPrevious = timingMode === 'afterPrev';
-    const isFixedDate = timingMode === 'fixedDate';
-
-    // Preserve existing status/doneDate if same id
-    const existing = existingSchedule.find(s => s.id === id);
-    let dueDate = existing?.dueDate || null;
-
-    // Calculate due date based on timing mode
-    if (!existing?.status || existing.status === 'pending') {
-      if (isFixedDate && dateInput) {
-        dueDate = dateInput.value; // use exactly what the user picked
-      } else if (!afterPrevious && c.amcStart) {
-        dueDate = addMonths(c.amcStart, val);
-      }
-      // afterPrevious due dates are calculated at markDone time
-    }
-
-    newSchedule.push({
-      id,
-      label,
-      afterPrevious,
-      fixedDate: isFixedDate ? (dateInput?.value || null) : null,
-      monthsFromStart: timingMode === 'fromStart' ? val : null,
-      monthsAfterPrevious: afterPrevious ? val : null,
-      dueDate,
-      status: existing?.status || 'pending',
-      doneDate: existing?.doneDate || null
-    });
-  });
-
-  const btn = document.getElementById('saveSchedBtn');
-  btn.disabled = true; btn.textContent = 'Saving...';
-
-  c.serviceSchedule = newSchedule;
-  try {
-    setSyncStatus('loading', '⏳ Saving...');
-    await apiCall('saveCustomer', { customer: c });
-    setSyncStatus('ok', '✅ Synced');
-    showToast('✅ Schedule saved!');
-    closeModal();
-    renderMain();
-    renderSidebar();
-    renderReminderBanner();
-  } catch(e) {
-    setSyncStatus('err', '❌ Error');
-    showToast('Error: ' + e.message);
-    btn.disabled = false; btn.textContent = '💾 Save Schedule';
-  }
-}
-
-// ============================================================
-// REGULAR CUSTOMER VIEW
-// ============================================================
+// REGULAR CUSTOMER VIEW// ============================================================
 function renderRegularMain(c) {
   const main = document.getElementById('mainContent');
   const visits = (c.services || []);
@@ -816,36 +600,19 @@ function renderRegularMain(c) {
         <button class="btn btn-danger" onclick="deleteCustomer(${c.id})">🗑️</button>
       </div>
     </div>
-
     <div class="stats-row" style="grid-template-columns:repeat(3,1fr);">
-      <div class="stat-card">
-        <div class="stat-label">Total Purchases</div>
-        <div class="stat-value neutral">${visits.length}</div>
-        <div class="stat-sub">Visit(s) on record</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Total Amount Spent</div>
-        <div class="stat-value" style="color:var(--text);">${fmt(totalSpent)}</div>
-        <div class="stat-sub">Across all visits</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Last Visit</div>
-        <div class="stat-value" style="font-size:16px;color:var(--profit);">${lastVisit ? fmtDate(lastVisit.date) : '—'}</div>
-        <div class="stat-sub">${lastVisit ? daysBetween(lastVisit.date, todayStr()) + ' days ago' : 'No visits yet'}</div>
-      </div>
+      <div class="stat-card"><div class="stat-label">Total Purchases</div><div class="stat-value neutral">${visits.length}</div><div class="stat-sub">Visit(s) on record</div></div>
+      <div class="stat-card"><div class="stat-label">Total Spent</div><div class="stat-value" style="color:var(--text);">${fmt(totalSpent)}</div><div class="stat-sub">Across all visits</div></div>
+      <div class="stat-card"><div class="stat-label">Last Visit</div><div class="stat-value" style="font-size:16px;color:var(--profit);">${lastVisit?fmtDate(lastVisit.date):'—'}</div><div class="stat-sub">${lastVisit?daysBetween(lastVisit.date,todayStr())+' days ago':'No visits yet'}</div></div>
     </div>
-
     <div class="section">
-      <div class="section-header">
-        <span class="section-title">ℹ️ Customer Info</span>
-      </div>
+      <div class="section-header"><span class="section-title">ℹ️ Customer Info</span></div>
       <div class="amc-info-grid" style="grid-template-columns:repeat(3,1fr);">
         <div><div class="amc-info-label">RO Model</div><div class="amc-info-value">${c.roModel||'—'}</div></div>
         <div><div class="amc-info-label">Type</div><div class="amc-info-value" style="font-family:'DM Sans';color:var(--profit);">🟢 Regular (No AMC)</div></div>
         <div><div class="amc-info-label">Notes</div><div class="amc-info-value" style="font-family:'DM Sans';font-size:12px;">${c.notes||'—'}</div></div>
       </div>
     </div>
-
     <div class="section">
       <div class="section-header">
         <span class="section-title">🛒 Purchase History</span>
@@ -896,7 +663,7 @@ async function saveRegularVisit(customerId) {
     if (!customer.services) customer.services=[];
     customer.services.push(service);
     setSyncStatus('ok','✅ Synced');
-    showToast('✅ Purchase logged in Google Sheets');
+    showToast('✅ Purchase logged');
     closeModal(); renderMain();
   } catch(e) {
     setSyncStatus('err','❌ Error');
@@ -917,25 +684,20 @@ function customerForm(c) {
   const isRegular = c?.customerType === 'regular';
   return `
     <h3>${isEdit?'✏️ Edit Customer':'👤 New Customer'}</h3>
-
     <div class="form-group">
       <label>Customer Type</label>
       <div style="display:flex;gap:8px;">
-        <button type="button" id="typeAMC" onclick="toggleCustomerType('amc')"
-          class="btn ${!isRegular?'btn-accent':'btn-ghost'}" style="flex:1;">🔵 AMC Customer</button>
-        <button type="button" id="typeRegular" onclick="toggleCustomerType('regular')"
-          class="btn ${isRegular?'btn-green':'btn-ghost'}" style="flex:1;">🟢 Regular Customer</button>
+        <button type="button" id="typeAMC" onclick="toggleCustomerType('amc')" class="btn ${!isRegular?'btn-accent':'btn-ghost'}" style="flex:1;">🔵 AMC Customer</button>
+        <button type="button" id="typeRegular" onclick="toggleCustomerType('regular')" class="btn ${isRegular?'btn-green':'btn-ghost'}" style="flex:1;">🟢 Regular Customer</button>
       </div>
       <input type="hidden" id="f_customerType" value="${isRegular?'regular':'amc'}">
     </div>
-
     <div class="form-row">
       <div class="form-group"><label>Customer Name *</label><input class="form-input" id="f_name" value="${c?.name||''}" placeholder="e.g. Ramesh Kumar"></div>
       <div class="form-group"><label>Phone</label><input class="form-input" id="f_phone" value="${c?.phone||''}" placeholder="9876543210"></div>
     </div>
     <div class="form-group"><label>Address</label><input class="form-input" id="f_address" value="${c?.address||''}" placeholder="House / Area"></div>
     <div class="form-group"><label>RO Model</label><input class="form-input" id="f_roModel" value="${c?.roModel||''}" placeholder="e.g. Kent Grand Plus"></div>
-
     <div id="amcFields" style="display:${isRegular?'none':'block'};">
       <div class="form-group"><label>AMC Amount (₹)</label><input class="form-input" id="f_amcAmount" type="number" value="${c?.amcAmount||''}" placeholder="5000"></div>
       <div class="form-row">
@@ -943,7 +705,6 @@ function customerForm(c) {
         <div class="form-group"><label>AMC End Date</label><input class="form-input" id="f_amcEnd" type="date" value="${c?.amcEnd||addYears(todayStr(),1)}"></div>
       </div>
     </div>
-
     <div class="form-group"><label>Notes</label><input class="form-input" id="f_notes" value="${c?.notes||''}" placeholder="Any special notes..."></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
@@ -991,8 +752,7 @@ async function saveCustomer(id) {
     amcStart: isRegular ? null : document.getElementById('f_amcStart').value,
     amcEnd: isRegular ? null : document.getElementById('f_amcEnd').value,
     notes: document.getElementById('f_notes').value.trim(),
-    services: existing?.services || [],
-    serviceSchedule: isRegular ? [] : (existing?.serviceSchedule || [])
+    services: existing?.services || []
   };
   try {
     setSyncStatus('loading', '⏳ Saving...');
@@ -1001,7 +761,7 @@ async function saveCustomer(id) {
     else { const idx = appData.customers.findIndex(c=>c.id===id); appData.customers[idx] = customer; }
     setSyncStatus('ok', '✅ Synced');
     showToast(isNew?'✅ Customer added':'✅ Customer updated');
-    closeModal(); renderSidebar(); renderMain();
+    closeModal(); renderSidebar(); renderMain(); renderReminderBanner();
   } catch(e) {
     setSyncStatus('err', '❌ Error');
     showToast('Error: '+e.message);
@@ -1023,7 +783,7 @@ async function deleteCustomer(id) {
 }
 
 // ============================================================
-// MODALS — SERVICE VISIT
+// MODALS — SERVICE VISIT (AMC)
 // ============================================================
 function openAddService(customerId) {
   openModal(`
@@ -1083,7 +843,7 @@ async function saveService(customerId) {
     if (!customer.services) customer.services=[];
     customer.services.push(service);
     setSyncStatus('ok','✅ Synced');
-    showToast('✅ Visit logged in Google Sheets');
+    showToast('✅ Visit logged');
     closeModal(); renderMain();
   } catch(e) {
     setSyncStatus('err','❌ Error');
@@ -1093,13 +853,15 @@ async function saveService(customerId) {
 }
 
 async function deleteService(customerId, serviceId) {
-  if (!confirm('Remove this visit?')) return;
+  if (!confirm('Remove this entry?')) return;
   try {
     setSyncStatus('loading','⏳ Deleting...');
     await apiCall('deleteService',{customerId,serviceId});
     const c = appData.customers.find(x=>x.id===customerId);
     c.services = c.services.filter(s=>s.id!==serviceId);
-    setSyncStatus('ok','✅ Synced'); showToast('Visit deleted'); renderMain();
+    setSyncStatus('ok','✅ Synced');
+    showToast('Entry deleted');
+    renderMain();
   } catch(e) { showToast('Error: '+e.message); }
 }
 </script>
