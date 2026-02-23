@@ -63,6 +63,18 @@
   .search-box::placeholder { color:var(--text-dim); }
   .add-customer-btn { width:100%; margin-top:10px; background:var(--accent); color:#000; border:none; border-radius:8px; padding:9px; font-family:'Syne',sans-serif; font-weight:700; font-size:13px; cursor:pointer; }
 
+  /* FILTER TABS */
+  .filter-tabs { display:flex; gap:4px; margin-top:10px; background:var(--bg); border-radius:8px; padding:3px; }
+  .filter-tab { flex:1; text-align:center; padding:5px 4px; font-size:11px; font-weight:700; font-family:'Syne',sans-serif; border-radius:6px; cursor:pointer; border:none; background:none; color:var(--text-dim); letter-spacing:0.3px; transition:all 0.15s; }
+  .filter-tab.active { background:var(--surface); color:var(--text); box-shadow:0 1px 4px rgba(0,0,0,0.3); }
+  .filter-tab.active.all { color:var(--text); }
+  .filter-tab.active.amc { color:var(--accent); }
+  .filter-tab.active.regular { color:var(--profit); }
+
+  /* REGULAR CUSTOMER BADGES */
+  .badge-regular { background:rgba(34,211,165,.12); color:var(--profit); }
+  .badge-last-visit { background:rgba(148,163,184,.1); color:var(--text-mid); }
+
   .customer-list { overflow-y:auto; flex:1; }
   .customer-item { padding:13px 16px; border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.15s; }
   .customer-item:hover { background:var(--surface2); }
@@ -240,6 +252,11 @@
       <div class="sidebar-top">
         <input class="search-box" id="searchInput" type="text" placeholder="🔍  Search customer...">
         <button class="add-customer-btn" onclick="openAddCustomer()">+ Add New Customer</button>
+        <div class="filter-tabs">
+          <button class="filter-tab active all" onclick="setFilter('all',this)">All</button>
+          <button class="filter-tab amc" onclick="setFilter('amc',this)">🔵 AMC</button>
+          <button class="filter-tab regular" onclick="setFilter('regular',this)">🟢 Regular</button>
+        </div>
       </div>
       <div class="customer-list" id="customerList">
         <div class="no-data"><span class="spinner"></span> Loading...</div>
@@ -267,6 +284,16 @@
 let SCRIPT_URL = localStorage.getItem('aquatrack_script_url') || '';
 let appData = { customers: [], nextId: 1 };
 let selectedCustomerId = null;
+let activeFilter = 'all'; // 'all', 'amc', 'regular'
+
+function setFilter(type, btn) {
+  activeFilter = type;
+  document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  selectedCustomerId = null;
+  renderSidebar();
+  document.getElementById('mainContent').innerHTML = `<div class="empty-state"><div style="font-size:48px;opacity:0.3;">💧</div><div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;color:var(--text-mid);">Select a Customer</div></div>`;
+}
 
 // ============================================================
 // INIT
@@ -417,18 +444,39 @@ function renderReminderBanner() {
 function renderSidebar() {
   const q = (document.getElementById('searchInput')?.value||'').toLowerCase();
   const list = document.getElementById('customerList');
-  const filtered = (appData.customers||[]).filter(c =>
+
+  let filtered = (appData.customers||[]).filter(c =>
     c.name.toLowerCase().includes(q)||(c.phone||'').includes(q)||(c.address||'').toLowerCase().includes(q)
   );
+
+  // Apply type filter
+  if (activeFilter === 'amc') filtered = filtered.filter(c => c.customerType !== 'regular');
+  if (activeFilter === 'regular') filtered = filtered.filter(c => c.customerType === 'regular');
+
   if (!filtered.length) { list.innerHTML = `<div class="no-data">${appData.customers.length===0?'No customers yet.':'No results.'}</div>`; return; }
 
   list.innerHTML = filtered.map(c => {
+    const isRegular = c.customerType === 'regular';
+
+    if (isRegular) {
+      // Regular customer — show last visit date
+      const visits = (c.services||[]);
+      const lastVisit = visits.length ? [...visits].sort((a,b)=>new Date(b.date)-new Date(a.date))[0].date : null;
+      return `<div class="customer-item ${selectedCustomerId===c.id?'active':''}" onclick="selectCustomer(${c.id})">
+        <div class="c-name">${c.name}</div>
+        <div class="c-meta">${c.phone?'📞 '+c.phone:''}</div>
+        <div class="c-badges">
+          <span class="c-badge badge-regular">🟢 Regular</span>
+          ${lastVisit?`<span class="c-badge badge-last-visit">Last: ${fmtDate(lastVisit)}</span>`:''}
+        </div>
+      </div>`;
+    }
+
+    // AMC customer
     const st = amcStatus(c);
     const badgeClass = st==='active'?'badge-active':st==='expired'?'badge-expired':'badge-expiring';
     const daysLeft = c.amcEnd ? Math.max(0, daysBetween(todayStr(), c.amcEnd)) : null;
     const badgeText = st==='expiring'?`Expiring in ${daysLeft}d`:st.charAt(0).toUpperCase()+st.slice(1);
-
-    // Check if any schedule is due soon
     const hasDueSoon = (c.serviceSchedule||[]).some(s => {
       if (s.status==='done'||!s.dueDate) return false;
       return daysBetween(todayStr(), s.dueDate) <= 7;
@@ -438,6 +486,7 @@ function renderSidebar() {
       <div class="c-name">${c.name}</div>
       <div class="c-meta">${c.phone?'📞 '+c.phone:''}</div>
       <div class="c-badges">
+        <span class="c-badge badge-amc" style="background:rgba(0,212,255,.1);color:var(--accent);">🔵 AMC</span>
         <span class="c-badge ${badgeClass}">${badgeText}</span>
         ${hasDueSoon?'<span class="c-badge badge-reminder">⚠️ Service Due</span>':''}
       </div>
@@ -462,6 +511,9 @@ function renderMain() {
   const c = appData.customers.find(x => x.id===selectedCustomerId);
   const main = document.getElementById('mainContent');
   if (!c) { main.innerHTML = `<div class="empty-state"><div style="font-size:48px;opacity:0.3;">💧</div><div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;color:var(--text-mid);">Select a Customer</div></div>`; return; }
+
+  // Route to different view for regular customers
+  if (c.customerType === 'regular') { renderRegularMain(c); return; }
 
   const totalCost = totalComponentCost(c);
   const amcAmt = Number(c.amcAmount)||0;
@@ -765,6 +817,138 @@ async function saveSchedule(customerId) {
 }
 
 // ============================================================
+// REGULAR CUSTOMER VIEW
+// ============================================================
+function renderRegularMain(c) {
+  const main = document.getElementById('mainContent');
+  const visits = (c.services || []);
+  const totalSpent = visits.reduce((sum, v) =>
+    sum + (v.components||[]).reduce((s2, co) => s2 + (Number(co.price)||0), 0), 0);
+  const lastVisit = visits.length ? [...visits].sort((a,b)=>new Date(b.date)-new Date(a.date))[0] : null;
+
+  const historyHtml = !visits.length
+    ? `<div class="no-data">No purchase history yet. Click "Log Purchase" to add one.</div>`
+    : `<table class="service-table">
+        <thead><tr><th>Date</th><th>Items Purchased</th><th>Total Amount</th><th>Notes</th><th></th></tr></thead>
+        <tbody>
+        ${[...visits].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(v => {
+          const vCost = (v.components||[]).reduce((sum,co)=>sum+(Number(co.price)||0),0);
+          return `<tr>
+            <td style="white-space:nowrap;">${fmtDate(v.date)}</td>
+            <td><div class="comp-chips">
+              ${(v.components||[]).map(co=>`<span class="comp-chip">${co.name} <span class="price">${fmt(co.price)}</span></span>`).join('')}
+              ${!(v.components||[]).length?'<span style="color:var(--text-dim);font-size:12px;">—</span>':''}
+            </div></td>
+            <td class="amount-cell">${vCost>0?fmt(vCost):'—'}</td>
+            <td style="color:var(--text-dim);font-size:12px;">${v.notes||'—'}</td>
+            <td><span class="delete-icon" onclick="deleteService(${c.id},'${v.id}')">🗑️</span></td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table>`;
+
+  main.innerHTML = `
+    <div class="customer-header">
+      <div class="customer-title">
+        <h2>🟢 ${c.name}</h2>
+        <p>${c.phone?'📞 '+c.phone:''} ${c.address?'  📍 '+c.address:''}</p>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-accent" onclick="openAddRegularVisit(${c.id})">+ Log Purchase</button>
+        <button class="btn btn-ghost" onclick="openEditCustomer(${c.id})">✏️ Edit</button>
+        <button class="btn btn-danger" onclick="deleteCustomer(${c.id})">🗑️</button>
+      </div>
+    </div>
+
+    <div class="stats-row" style="grid-template-columns:repeat(3,1fr);">
+      <div class="stat-card">
+        <div class="stat-label">Total Purchases</div>
+        <div class="stat-value neutral">${visits.length}</div>
+        <div class="stat-sub">Visit(s) on record</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total Amount Spent</div>
+        <div class="stat-value" style="color:var(--text);">${fmt(totalSpent)}</div>
+        <div class="stat-sub">Across all visits</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Last Visit</div>
+        <div class="stat-value" style="font-size:16px;color:var(--profit);">${lastVisit ? fmtDate(lastVisit.date) : '—'}</div>
+        <div class="stat-sub">${lastVisit ? daysBetween(lastVisit.date, todayStr()) + ' days ago' : 'No visits yet'}</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">ℹ️ Customer Info</span>
+      </div>
+      <div class="amc-info-grid" style="grid-template-columns:repeat(3,1fr);">
+        <div><div class="amc-info-label">RO Model</div><div class="amc-info-value">${c.roModel||'—'}</div></div>
+        <div><div class="amc-info-label">Type</div><div class="amc-info-value" style="font-family:'DM Sans';color:var(--profit);">🟢 Regular (No AMC)</div></div>
+        <div><div class="amc-info-label">Notes</div><div class="amc-info-value" style="font-family:'DM Sans';font-size:12px;">${c.notes||'—'}</div></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">🛒 Purchase History</span>
+        <button class="btn btn-accent btn-sm" onclick="openAddRegularVisit(${c.id})">+ Log Purchase</button>
+      </div>
+      ${historyHtml}
+    </div>`;
+}
+
+function openAddRegularVisit(customerId) {
+  openModal(`
+    <h3>🛒 Log Purchase</h3>
+    <div class="form-group"><label>Visit Date *</label><input class="form-input" id="s_date" type="date" value="${todayStr()}"></div>
+    <div class="form-group">
+      <label>Items / Components Purchased</label>
+      <div class="comp-rows" id="compRows">
+        <div class="comp-row">
+          <input class="form-input" placeholder="Item name (e.g. Sediment Filter)" data-comp-name>
+          <input class="form-input price-input" placeholder="Price ₹" type="number" data-comp-price>
+          <button class="remove-comp-btn" onclick="this.closest('.comp-row').remove()">×</button>
+        </div>
+      </div>
+      <button style="color:var(--accent);font-size:12px;cursor:pointer;background:none;border:none;text-decoration:underline;font-family:'DM Sans',sans-serif;" onclick="addCompRow()">+ Add item</button>
+    </div>
+    <div class="form-group"><label>Notes</label><input class="form-input" id="s_notes" placeholder="e.g. Customer complained about taste"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-accent" id="saveServiceBtn" onclick="saveRegularVisit(${customerId})">Save Purchase</button>
+    </div>`);
+}
+
+async function saveRegularVisit(customerId) {
+  const date = document.getElementById('s_date').value;
+  if (!date) { alert('Date required'); return; }
+  const btn = document.getElementById('saveServiceBtn');
+  btn.disabled=true; btn.textContent='Saving...';
+  const notes = document.getElementById('s_notes').value.trim();
+  const components = [];
+  document.querySelectorAll('[data-comp-name]').forEach((inp,i) => {
+    const name = inp.value.trim();
+    if (name) components.push({ name, price: Number(document.querySelectorAll('[data-comp-price]')[i]?.value||0) });
+  });
+  const service = { id:uid(), date, type:'purchase', notes, components };
+  try {
+    setSyncStatus('loading','⏳ Saving...');
+    await apiCall('saveService',{ customerId, service });
+    const customer = appData.customers.find(c=>c.id===customerId);
+    if (!customer.services) customer.services=[];
+    customer.services.push(service);
+    setSyncStatus('ok','✅ Synced');
+    showToast('✅ Purchase logged in Google Sheets');
+    closeModal(); renderMain();
+  } catch(e) {
+    setSyncStatus('err','❌ Error');
+    showToast('Error: '+e.message);
+    btn.disabled=false; btn.textContent='Save Purchase';
+  }
+}
+
+// ============================================================
 // MODALS — CUSTOMER
 // ============================================================
 function openModal(html) { document.getElementById('modalBox').innerHTML = html; document.getElementById('modalOverlay').style.display = 'flex'; }
@@ -773,29 +957,60 @@ function handleOverlayClick(e) { if (e.target===document.getElementById('modalOv
 
 function customerForm(c) {
   const isEdit = !!c;
+  const isRegular = c?.customerType === 'regular';
   return `
     <h3>${isEdit?'✏️ Edit Customer':'👤 New Customer'}</h3>
+
+    <div class="form-group">
+      <label>Customer Type</label>
+      <div style="display:flex;gap:8px;">
+        <button type="button" id="typeAMC" onclick="toggleCustomerType('amc')"
+          class="btn ${!isRegular?'btn-accent':'btn-ghost'}" style="flex:1;">🔵 AMC Customer</button>
+        <button type="button" id="typeRegular" onclick="toggleCustomerType('regular')"
+          class="btn ${isRegular?'btn-green':'btn-ghost'}" style="flex:1;">🟢 Regular Customer</button>
+      </div>
+      <input type="hidden" id="f_customerType" value="${isRegular?'regular':'amc'}">
+    </div>
+
     <div class="form-row">
       <div class="form-group"><label>Customer Name *</label><input class="form-input" id="f_name" value="${c?.name||''}" placeholder="e.g. Ramesh Kumar"></div>
       <div class="form-group"><label>Phone</label><input class="form-input" id="f_phone" value="${c?.phone||''}" placeholder="9876543210"></div>
     </div>
     <div class="form-group"><label>Address</label><input class="form-input" id="f_address" value="${c?.address||''}" placeholder="House / Area"></div>
-    <div class="form-row">
-      <div class="form-group"><label>RO Model</label><input class="form-input" id="f_roModel" value="${c?.roModel||''}" placeholder="Kent Grand Plus"></div>
-      <div class="form-group"><label>AMC Amount (₹)</label><input class="form-input" id="f_amcAmount" type="number" value="${c?.amcAmount||''}" placeholder="5000"></div>
+    <div class="form-group"><label>RO Model</label><input class="form-input" id="f_roModel" value="${c?.roModel||''}" placeholder="e.g. Kent Grand Plus"></div>
+
+    <div id="amcFields" style="display:${isRegular?'none':'block'};">
+      <div class="form-row">
+        <div class="form-group"><label>AMC Amount (₹)</label><input class="form-input" id="f_amcAmount" type="number" value="${c?.amcAmount||''}" placeholder="5000"></div>
+        <div class="form-group"><label>Free Services Included</label><input class="form-input" id="f_freeServices" type="number" value="${c?.freeServices||2}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>AMC Start Date</label><input class="form-input" id="f_amcStart" type="date" value="${c?.amcStart||todayStr()}"></div>
+        <div class="form-group"><label>AMC End Date</label><input class="form-input" id="f_amcEnd" type="date" value="${c?.amcEnd||addYears(todayStr(),1)}"></div>
+      </div>
     </div>
-    <div class="form-row">
-      <div class="form-group"><label>AMC Start Date</label><input class="form-input" id="f_amcStart" type="date" value="${c?.amcStart||todayStr()}"></div>
-      <div class="form-group"><label>AMC End Date</label><input class="form-input" id="f_amcEnd" type="date" value="${c?.amcEnd||addYears(todayStr(),1)}"></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Free Services Included</label><input class="form-input" id="f_freeServices" type="number" value="${c?.freeServices||2}"></div>
-    </div>
+
     <div class="form-group"><label>Notes</label><input class="form-input" id="f_notes" value="${c?.notes||''}" placeholder="Any special notes..."></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
       <button class="btn btn-accent" id="saveCustomerBtn" onclick="saveCustomer(${c?.id||'null'})">${isEdit?'Save Changes':'Add Customer'}</button>
     </div>`;
+}
+
+function toggleCustomerType(type) {
+  document.getElementById('f_customerType').value = type;
+  const amcBtn = document.getElementById('typeAMC');
+  const regBtn = document.getElementById('typeRegular');
+  const amcFields = document.getElementById('amcFields');
+  if (type === 'amc') {
+    amcBtn.className = 'btn btn-accent'; amcBtn.style.flex = '1';
+    regBtn.className = 'btn btn-ghost'; regBtn.style.flex = '1';
+    amcFields.style.display = 'block';
+  } else {
+    amcBtn.className = 'btn btn-ghost'; amcBtn.style.flex = '1';
+    regBtn.className = 'btn btn-green'; regBtn.style.flex = '1';
+    amcFields.style.display = 'none';
+  }
 }
 
 function openAddCustomer() { openModal(customerForm(null)); }
@@ -809,19 +1024,22 @@ async function saveCustomer(id) {
   const isNew = !id;
   const customerId = isNew ? appData.nextId : id;
   const existing = isNew ? null : appData.customers.find(c=>c.id===id);
+  const customerType = document.getElementById('f_customerType').value;
+  const isRegular = customerType === 'regular';
   const customer = {
     id: customerId,
+    customerType,
     name,
     phone: document.getElementById('f_phone').value.trim(),
     address: document.getElementById('f_address').value.trim(),
     roModel: document.getElementById('f_roModel').value.trim(),
-    amcAmount: document.getElementById('f_amcAmount').value,
-    amcStart: document.getElementById('f_amcStart').value,
-    amcEnd: document.getElementById('f_amcEnd').value,
-    freeServices: document.getElementById('f_freeServices').value,
+    amcAmount: isRegular ? null : document.getElementById('f_amcAmount').value,
+    amcStart: isRegular ? null : document.getElementById('f_amcStart').value,
+    amcEnd: isRegular ? null : document.getElementById('f_amcEnd').value,
+    freeServices: isRegular ? null : document.getElementById('f_freeServices').value,
     notes: document.getElementById('f_notes').value.trim(),
     services: existing?.services || [],
-    serviceSchedule: existing?.serviceSchedule || []
+    serviceSchedule: isRegular ? [] : (existing?.serviceSchedule || [])
   };
   try {
     setSyncStatus('loading', '⏳ Saving...');
