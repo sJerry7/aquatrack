@@ -503,7 +503,7 @@ function renderMain() {
             <td style="font-family:'DM Mono',monospace;color:var(--text-dim);">${idx+1}</td>
             <td><strong>${s.label}</strong></td>
             <td style="font-family:'DM Mono',monospace;">${dueStr}${daysUntil!==null?`<br><span style="font-size:11px;color:${daysUntil<0?'var(--loss)':daysUntil<=7?'var(--warn)':'var(--text-dim)'};">${daysUntil<0?Math.abs(daysUntil)+' days overdue':daysUntil===0?'Due today':daysUntil+' days left'}</span>`:''}</td>
-            <td style="font-size:12px;color:var(--text-dim);">${s.afterPrevious?`${s.monthsAfterPrevious}m after prev done`:`${s.monthsFromStart}m from AMC start`}</td>
+            <td style="font-size:12px;color:var(--text-dim);">${s.fixedDate ? `📅 Fixed date` : s.afterPrevious ? `${s.monthsAfterPrevious}m after prev done` : `${s.monthsFromStart}m from AMC start`}</td>
             <td><span class="sched-status ${ssClass}">${ssLabel}</span></td>
             <td>${actionHtml}</td>
           </tr>`;
