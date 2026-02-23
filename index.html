@@ -184,6 +184,7 @@
   @keyframes spin { to { transform:rotate(360deg); } }
   .toast { position:fixed; bottom:24px; right:24px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px 18px; font-size:13px; z-index:999; box-shadow:0 8px 30px rgba(0,0,0,.4); animation:slideUp 0.3s ease; }
   @keyframes slideUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-8px)} 40%{transform:translateX(8px)} 60%{transform:translateX(-5px)} 80%{transform:translateX(5px)} }
   ::-webkit-scrollbar { width:5px; }
   ::-webkit-scrollbar-track { background:var(--surface); }
   ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
@@ -193,24 +194,27 @@
 </head>
 <body>
 
-<!-- SETUP SCREEN -->
-<div class="setup-screen" id="setupScreen">
-  <div class="setup-card">
-    <h1>💧 AquaTrack</h1>
-    <p>Connect your Google Sheet to get started. All data syncs across every device in real time.</p>
-    <div class="setup-steps">
-      <div class="setup-step"><div class="step-num">1</div><div class="step-text">Go to <a href="https://script.google.com" target="_blank">script.google.com</a> → Create a <strong>New Project</strong></div></div>
-      <div class="setup-step"><div class="step-num">2</div><div class="step-text">Paste the <strong>Apps Script v2 code</strong> provided, update <strong>OWNER_EMAIL</strong>, and Save</div></div>
-      <div class="setup-step"><div class="step-num">3</div><div class="step-text"><strong>Deploy → New Deployment</strong> · Type: Web App · Execute as: Me · Access: Anyone</div></div>
-      <div class="setup-step"><div class="step-num">4</div><div class="step-text">For daily email reminders: <strong>Triggers → Add Trigger → dailyReminderCheck → Day timer → 9am</strong></div></div>
-      <div class="setup-step"><div class="step-num">5</div><div class="step-text">Paste your <strong>Web App URL</strong> below and connect</div></div>
+<!-- LOGIN SCREEN -->
+<div class="setup-screen" id="loginScreen">
+  <div class="setup-card" style="max-width:400px;">
+    <h1 style="text-align:center;margin-bottom:4px;">💧 AquaTrack</h1>
+    <p style="text-align:center;margin-bottom:28px;">Admin Login</p>
+    <div class="form-group">
+      <label style="font-size:11px;text-transform:uppercase;letter-spacing:0.7px;color:var(--text-dim);display:block;margin-bottom:6px;">Username</label>
+      <input class="url-input" id="loginUser" type="text" placeholder="Enter username" autocomplete="username"
+        onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
     </div>
-    <div class="url-input-wrap">
-      <label>Google Apps Script Web App URL</label>
-      <input class="url-input" id="scriptUrlInput" type="url" placeholder="https://script.google.com/macros/s/XXXXXXX/exec">
+    <div class="form-group" style="margin-top:12px;">
+      <label style="font-size:11px;text-transform:uppercase;letter-spacing:0.7px;color:var(--text-dim);display:block;margin-bottom:6px;">Password</label>
+      <div style="position:relative;">
+        <input class="url-input" id="loginPass" type="password" placeholder="Enter password" autocomplete="current-password"
+          onkeydown="if(event.key==='Enter')doLogin()" style="padding-right:44px;">
+        <button onclick="togglePassVis()" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:14px;" id="eyeBtn">👁️</button>
+      </div>
     </div>
-    <button class="connect-btn" id="connectBtn" onclick="connectSheet()">🔗 Connect & Load Data</button>
-    <div id="connectError" style="color:var(--loss);font-size:12px;margin-top:10px;display:none;"></div>
+    <div id="loginError" style="color:var(--loss);font-size:12px;margin-top:10px;display:none;padding:8px 12px;background:rgba(248,113,113,.08);border-radius:6px;border:1px solid rgba(248,113,113,.2);"></div>
+    <button class="connect-btn" id="loginBtn" onclick="doLogin()" style="margin-top:18px;">🔐 Login</button>
+    <p style="text-align:center;font-size:11px;color:var(--text-dim);margin-top:16px;">AquaTrack · RO Filter AMC Manager</p>
   </div>
 </div>
 
@@ -221,7 +225,7 @@
     <div class="header-right">
       <span class="sync-status sync-ok" id="syncStatus">✅ Synced</span>
       <button class="btn btn-ghost" onclick="refreshData()" style="font-size:11px;">⟳ Refresh</button>
-      <button class="btn btn-ghost" onclick="disconnectSheet()" style="font-size:11px;">Disconnect</button>
+      <button class="btn btn-ghost" onclick="doLogout()" style="font-size:11px;">🔒 Logout</button>
     </div>
   </header>
 
@@ -262,17 +266,102 @@
 </div>
 
 <script>
+// ── CONFIG ─────────────────────────────────────────────────────
+// Only the Script URL lives here — credentials are in Apps Script
+const SCRIPT_URL  = 'YOUR_APPS_SCRIPT_URL_HERE'; // ← Paste your Web App URL
+const TOKEN_KEY   = 'aquatrack_token';
+const TOKEN_EXP   = 'aquatrack_token_exp';
+
 // ── STATE ──────────────────────────────────────────────────────
-let SCRIPT_URL = localStorage.getItem('aquatrack_script_url') || '';
 let appData = { customers: [], nextId: 1 };
 let selectedCustomerId = null;
 let activeFilter = 'all';
+let SESSION_TOKEN = localStorage.getItem(TOKEN_KEY) || null;
 
 // ── INIT ───────────────────────────────────────────────────────
-window.onload = () => { if (SCRIPT_URL) { showApp(); refreshData(); } };
+window.onload = () => {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const exp   = localStorage.getItem(TOKEN_EXP);
+  if (token && exp && Date.now() < parseInt(exp)) {
+    SESSION_TOKEN = token;
+    showApp();
+    refreshData();
+  } else {
+    clearSession();
+    document.getElementById('loginScreen').style.display = 'flex';
+  }
+};
+
+function clearSession() {
+  SESSION_TOKEN = null;
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_EXP);
+}
+
+function togglePassVis() {
+  const inp = document.getElementById('loginPass');
+  const btn = document.getElementById('eyeBtn');
+  if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; }
+  else { inp.type = 'password'; btn.textContent = '👁️'; }
+}
+
+async function doLogin() {
+  const user  = document.getElementById('loginUser').value.trim();
+  const pass  = document.getElementById('loginPass').value;
+  const errEl = document.getElementById('loginError');
+  const btn   = document.getElementById('loginBtn');
+  if (!user || !pass) { errEl.textContent = '⚠️ Please enter username and password.'; errEl.style.display = 'block'; return; }
+
+  btn.disabled = true; btn.textContent = '⏳ Verifying...';
+  errEl.style.display = 'none';
+
+  try {
+    const res = await fetch(SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'login', username: user, password: pass }),
+      headers: { 'Content-Type': 'text/plain' }
+    });
+    const data = await res.json();
+
+    if (data.success && data.token) {
+      SESSION_TOKEN = data.token;
+      localStorage.setItem(TOKEN_KEY, data.token);
+      // Store expiry time in ms
+      localStorage.setItem(TOKEN_EXP, String(Date.now() + data.expiresIn * 1000));
+      showApp();
+      refreshData();
+    } else {
+      errEl.textContent = '❌ Incorrect username or password.';
+      errEl.style.display = 'block';
+      document.getElementById('loginPass').value = '';
+      document.getElementById('loginPass').focus();
+      const card = document.querySelector('.setup-card');
+      card.style.animation = 'shake 0.4s ease';
+      setTimeout(() => card.style.animation = '', 400);
+    }
+  } catch(e) {
+    errEl.textContent = '❌ Could not reach server. Check your connection.';
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = '🔐 Login';
+  }
+}
+
+async function doLogout() {
+  if (!confirm('Log out of AquaTrack?')) return;
+  // Tell server to invalidate the token
+  try { await apiCall('logout'); } catch(e) {}
+  clearSession();
+  appData = { customers:[], nextId:1 }; selectedCustomerId = null;
+  document.getElementById('appShell').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('loginUser').value = '';
+  document.getElementById('loginPass').value = '';
+  document.getElementById('loginError').style.display = 'none';
+}
 
 function showApp() {
-  document.getElementById('setupScreen').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appShell').style.display = 'block';
 }
 
@@ -283,34 +372,6 @@ function setFilter(type, btn) {
   selectedCustomerId = null;
   renderSidebar();
   document.getElementById('mainContent').innerHTML = `<div class="empty-state"><div style="font-size:48px;opacity:0.3;">💧</div><div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;color:var(--text-mid);">Select a Customer</div></div>`;
-}
-
-async function connectSheet() {
-  const url = document.getElementById('scriptUrlInput').value.trim();
-  const errEl = document.getElementById('connectError');
-  errEl.style.display = 'none';
-  if (!url.includes('script.google.com')) { errEl.textContent = '⚠️ Please paste a valid Google Apps Script URL.'; errEl.style.display = 'block'; return; }
-  const btn = document.getElementById('connectBtn');
-  btn.disabled = true; btn.textContent = '⏳ Connecting...';
-  try {
-    const result = await apiCall('getAll', {}, url);
-    SCRIPT_URL = url;
-    localStorage.setItem('aquatrack_script_url', url);
-    appData = result;
-    showApp(); renderSidebar(); renderReminderBanner();
-    showToast('✅ Connected to Google Sheets!');
-  } catch(e) {
-    errEl.textContent = '❌ Could not connect. ' + e.message;
-    errEl.style.display = 'block';
-  } finally { btn.disabled = false; btn.textContent = '🔗 Connect & Load Data'; }
-}
-
-function disconnectSheet() {
-  if (!confirm('Disconnect?')) return;
-  localStorage.removeItem('aquatrack_script_url');
-  SCRIPT_URL = ''; appData = { customers:[], nextId:1 }; selectedCustomerId = null;
-  document.getElementById('setupScreen').style.display = 'flex';
-  document.getElementById('appShell').style.display = 'none';
 }
 
 async function refreshData() {
@@ -324,13 +385,24 @@ async function refreshData() {
 }
 
 // ── API ────────────────────────────────────────────────────────
-async function apiCall(action, body = {}, urlOverride = null) {
-  const url = urlOverride || SCRIPT_URL;
-  const response = action === 'getAll'
-    ? await fetch(`${url}?action=getAll`)
-    : await fetch(url, { method:'POST', body:JSON.stringify({ action, ...body }), headers:{'Content-Type':'text/plain'} });
+async function apiCall(action, body = {}) {
+  const response = await fetch(SCRIPT_URL, {
+    method: 'POST',
+    body: JSON.stringify({ action, token: SESSION_TOKEN, ...body }),
+    headers: { 'Content-Type': 'text/plain' }
+  });
   if (!response.ok) throw new Error('HTTP ' + response.status);
   const data = await response.json();
+  if (data.error === 'UNAUTHORIZED') {
+    // Token expired or invalid — force logout
+    clearSession();
+    appData = { customers:[], nextId:1 }; selectedCustomerId = null;
+    document.getElementById('appShell').style.display = 'none';
+    document.getElementById('loginScreen').style.display = 'flex';
+    document.getElementById('loginError').textContent = '⚠️ Session expired. Please log in again.';
+    document.getElementById('loginError').style.display = 'block';
+    throw new Error('Session expired');
+  }
   if (data.error) throw new Error(data.error);
   return data;
 }
