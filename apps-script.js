@@ -5,8 +5,8 @@
 const SHEET_NAME  = "AquaTrack";
 const INDEX_NAME  = "AquaTrack_Index";   // Lightweight index for sidebar
 const OWNER_EMAILS = [
-  "mg31629@gmail.com",         // ← Primary
-  "letscode291@gmail.com",      // ← Add the actual email here
+  "mg31629@gmail.com",   // ← Primary
+  "letscode291@gmail.com",    // ← Add more emails here
 ];
 
 const ADMIN_USERNAME = "admin";
@@ -385,36 +385,37 @@ function dailyReminderCheck() {
   if (!expiring.length) return;
   expiring.sort((a, b) => a.daysLeft - b.daysLeft);
 
-  let html = `
+  let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body>
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
       <div style="background:#0a0f1e;padding:24px;border-radius:8px 8px 0 0;">
-        <h2 style="color:#00d4ff;margin:0;">💧 AquaTrack — AMC Expiry Reminder</h2>
+        <h2 style="color:#00d4ff;margin:0;">&#128167; AquaTrack &mdash; AMC Expiry Reminder</h2>
         <p style="color:#94a3b8;margin:8px 0 0;">The following AMCs are expiring within 7 days</p>
       </div>
       <div style="background:#111827;padding:20px;border-radius:0 0 8px 8px;border:1px solid #1f2d47;">`;
 
   expiring.forEach(({ customer, daysLeft }) => {
-    const urgency = daysLeft === 0 ? '🔴 EXPIRES TODAY'
-      : daysLeft <= 2 ? `🟠 Expires in ${daysLeft} day(s)`
-      : `🟡 Expires in ${daysLeft} days`;
+    const urgencyIcon = daysLeft === 0 ? '&#128308;' : daysLeft <= 2 ? '&#128992;' : '&#128993;';
+    const urgencyText = daysLeft === 0 ? 'EXPIRES TODAY' : `Expires in ${daysLeft} day(s)`;
     const endFormatted = new Date(customer.amcEnd).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
     html += `
       <div style="background:#1a2235;border:1px solid #1f2d47;border-radius:8px;padding:16px;margin-bottom:12px;">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
           <strong style="color:#e2e8f0;font-size:16px;">${customer.name}</strong>
-          <span style="font-size:13px;">${urgency}</span>
+          <span style="font-size:13px;">${urgencyIcon} ${urgencyText}</span>
         </div>
-        <div style="color:#94a3b8;font-size:13px;margin-top:8px;">📅 AMC End: <strong style="color:#00d4ff;">${endFormatted}</strong></div>
-        ${customer.phone   ? `<div style="color:#94a3b8;font-size:13px;margin-top:4px;">📞 ${customer.phone}</div>` : ''}
-        ${customer.roModel ? `<div style="color:#94a3b8;font-size:13px;margin-top:4px;">🔧 ${customer.roModel}</div>` : ''}
+        <div style="color:#94a3b8;font-size:13px;margin-top:8px;">&#128197; AMC End: <strong style="color:#00d4ff;">${endFormatted}</strong></div>
+        ${customer.phone   ? `<div style="color:#94a3b8;font-size:13px;margin-top:4px;">&#128222; ${customer.phone}</div>` : ''}
+        ${customer.roModel ? `<div style="color:#94a3b8;font-size:13px;margin-top:4px;">&#128295; ${customer.roModel}</div>` : ''}
       </div>`;
   });
 
-  html += `<p style="color:#64748b;font-size:12px;margin-top:16px;">${expiring.length} AMC(s) expiring soon.</p></div></div>`;
+  html += `<p style="color:#64748b;font-size:12px;margin-top:16px;">${expiring.length} AMC(s) expiring soon.</p></div></div></body></html>`;
 
-  GmailApp.sendEmail(OWNER_EMAIL,
-    `⚠️ AquaTrack: ${expiring.length} AMC(s) Expiring Within 7 Days`,
-    '', { htmlBody: html });
+  OWNER_EMAILS.forEach(email => {
+    GmailApp.sendEmail(email,
+      `[AquaTrack] ${expiring.length} AMC(s) Expiring Within 7 Days`,
+      '', { htmlBody: html });
+  });
 }
 
 function testReminder() {
@@ -422,9 +423,11 @@ function testReminder() {
     const { customers } = getAllData();
     const amcCustomers = customers.filter(c => c.customerType !== 'regular' && c.amcEnd);
     Logger.log("AMC customers: " + amcCustomers.length);
-    GmailApp.sendEmail(OWNER_EMAIL, "AquaTrack — Test Email",
-      "✅ Working!\n\nAMC customers: " + amcCustomers.length + "\n\n" +
-      amcCustomers.map(c => "• " + c.name + " — ends: " + c.amcEnd).join("\n"));
-    Logger.log("Sent to " + OWNER_EMAIL);
+    const body = "✅ Working!\n\nAMC customers: " + amcCustomers.length + "\n\n" +
+      amcCustomers.map(c => "• " + c.name + " — ends: " + c.amcEnd).join("\n");
+    OWNER_EMAILS.forEach(email => {
+      GmailApp.sendEmail(email, "AquaTrack — Test Email", body);
+      Logger.log("Sent to " + email);
+    });
   } catch(e) { Logger.log("ERROR: " + e.toString()); }
 }
