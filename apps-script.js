@@ -5,12 +5,12 @@
 const SHEET_NAME  = "AquaTrack";
 const INDEX_NAME  = "AquaTrack_Index";   // Lightweight index for sidebar
 const OWNER_EMAILS = [
-  "mg31629@gmail.com",   // ← Primary
-  "letscode291@gmail.com",    // ← Add more emails here
+  "YOUR_EMAIL_HERE",   // ← Primary
+  "YOUR_EMAIL_HERE",    // ← Add more emails here
 ];
 
-const ADMIN_USERNAME = "admin";
-const ADMIN_PASSWORD = "manish123";
+const ADMIN_USERNAME = "YOUR_USERNAME_HERE";
+const ADMIN_PASSWORD = "YOUR_PASSWORD_HERE";
 
 const SESSION_HOURS = 24;
 const TOKEN_SHEET   = "Sessions";
