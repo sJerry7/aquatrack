@@ -321,16 +321,40 @@
 <script>
 // ── CONFIG ─────────────────────────────────────────────────────
 // Only the Script URL lives here — credentials are in Apps Script
-const SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbyJSlFjOamrcALcwCCHzUJhKTDOapI9WNovkRxUmeqbzWjb9p8eYDLlUibm_DZ-3MiM/exec'; // ← Paste your Web App URL
+const SCRIPT_URL  = 'YOUR_APPS_SCRIPT_URL_HERE'; // ← Paste your Web App URL
 const TOKEN_KEY   = 'aquatrack_token';
-  
 const TOKEN_EXP   = 'aquatrack_token_exp';
 
 // ── STATE ──────────────────────────────────────────────────────
+// appData.customers = lightweight index only (name, phone, amcEnd, etc.)
+// fullCustomerCache = { [id]: fullCustomerObject } — loaded on demand
 let appData = { customers: [], nextId: 1 };
+let fullCustomerCache = {};         // in-memory cache of full customer data
 let selectedCustomerId = null;
 let activeFilter = 'all';
+let searchDebounceTimer = null;
 let SESSION_TOKEN = localStorage.getItem(TOKEN_KEY) || null;
+
+// ── LOCAL STORAGE CACHE ─────────────────────────────────────────
+// Persists the sidebar index so reloads are instant, then syncs quietly
+const LS_INDEX_KEY = 'aquatrack_index_v1';
+const LS_INDEX_TS  = 'aquatrack_index_ts';
+const INDEX_MAX_AGE = 5 * 60 * 1000; // 5 min — background refresh after this
+
+function saveIndexToLS(data) {
+  try {
+    localStorage.setItem(LS_INDEX_KEY, JSON.stringify(data));
+    localStorage.setItem(LS_INDEX_TS, Date.now().toString());
+  } catch(e) {} // quota exceeded — silently skip
+}
+function loadIndexFromLS() {
+  try {
+    const raw = localStorage.getItem(LS_INDEX_KEY);
+    const ts  = parseInt(localStorage.getItem(LS_INDEX_TS) || '0');
+    if (raw) return { data: JSON.parse(raw), age: Date.now() - ts };
+  } catch(e) {}
+  return null;
+}
 
 // ── INIT ───────────────────────────────────────────────────────
 window.onload = () => {
@@ -339,7 +363,21 @@ window.onload = () => {
   if (token && exp && Date.now() < parseInt(exp)) {
     SESSION_TOKEN = token;
     showApp();
-    refreshData();
+
+    // Show cached sidebar INSTANTLY if we have it
+    const cached = loadIndexFromLS();
+    if (cached) {
+      appData = cached.data;
+      renderSidebar();
+      renderReminderBanner();
+      setSyncStatus('ok', '✅ Cached');
+      // If cache is stale, refresh quietly in background
+      if (cached.age > INDEX_MAX_AGE) {
+        setTimeout(() => refreshIndex(true), 100);
+      }
+    } else {
+      refreshIndex(false);
+    }
   } else {
     clearSession();
     document.getElementById('loginScreen').style.display = 'flex';
@@ -406,7 +444,11 @@ async function doLogout() {
   // Tell server to invalidate the token
   try { await apiCall('logout'); } catch(e) {}
   clearSession();
-  appData = { customers:[], nextId:1 }; selectedCustomerId = null;
+  localStorage.removeItem(LS_INDEX_KEY);
+  localStorage.removeItem(LS_INDEX_TS);
+  appData = { customers:[], nextId:1 };
+  fullCustomerCache = {};
+  selectedCustomerId = null;
   document.getElementById('appShell').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('loginUser').value = '';
@@ -428,15 +470,31 @@ function setFilter(type, btn) {
   document.getElementById('mainContent').innerHTML = `<div class="empty-state"><div style="font-size:48px;opacity:0.3;">💧</div><div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;color:var(--text-mid);">Select a Customer</div></div>`;
 }
 
-async function refreshData() {
-  setSyncStatus('loading', '⏳ Syncing...');
+// Fetch lightweight index only (fast even with 4000 customers)
+async function refreshIndex(isBackground = false) {
+  if (!isBackground) setSyncStatus('loading', '⏳ Syncing...');
+  else setSyncStatus('loading', '⟳ Updating...');
   try {
-    appData = await apiCall('getAll');
-    renderSidebar(); renderReminderBanner();
-    if (selectedCustomerId) renderMain();
+    const result = await apiCall('getIndex');
+    appData = result;
+    fullCustomerCache = {}; // bust full-data cache on refresh
+    saveIndexToLS(result);
+    renderSidebar();
+    renderReminderBanner();
+    // Re-render detail view if customer still selected (fetch fresh full data)
+    if (selectedCustomerId) {
+      delete fullCustomerCache[selectedCustomerId];
+      await loadAndRenderCustomer(selectedCustomerId);
+    }
     setSyncStatus('ok', '✅ Synced');
-  } catch(e) { setSyncStatus('err', '❌ Sync failed'); }
+  } catch(e) {
+    setSyncStatus('err', '❌ Sync failed');
+    if (!isBackground) showToast('❌ Could not sync: ' + e.message);
+  }
 }
+
+// Keep refreshData as alias for ⟳ Refresh button
+async function refreshData() { await refreshIndex(false); }
 
 // ── API ────────────────────────────────────────────────────────
 async function apiCall(action, body = {}) {
@@ -523,11 +581,16 @@ function renderSidebar() {
   if (activeFilter === 'regular') filtered = filtered.filter(c => c.customerType === 'regular');
   if (!filtered.length) { list.innerHTML = `<div class="no-data">${appData.customers.length===0?'No customers yet.':'No results.'}</div>`; return; }
 
-  list.innerHTML = filtered.map(c => {
+  // Virtual list: only render visible items for large lists
+  const VISIBLE_LIMIT = 200;
+  const displayList = filtered.slice(0, VISIBLE_LIMIT);
+  const overflow = filtered.length - VISIBLE_LIMIT;
+
+  list.innerHTML = displayList.map(c => {
     if (c.customerType === 'regular') {
-      const visits = c.services||[];
-      const lastVisit = visits.length ? [...visits].sort((a,b)=>new Date(b.date)-new Date(a.date))[0].date : null;
-      const pendingCount = visits.filter(v => v.type==='complaint' && v.status!=='done').length;
+      // Use pre-computed index fields — no services array needed
+      const lastVisit    = c.lastVisit || null;
+      const pendingCount = c.pendingComplaints || 0;
       return `<div class="customer-item ${selectedCustomerId===c.id?'active':''}" onclick="selectCustomer(${c.id})">
         <div class="c-name">${c.name}</div>
         <div class="c-meta">${c.phone?'📞 '+c.phone:''}</div>
@@ -542,7 +605,7 @@ function renderSidebar() {
     const badgeClass = st==='active'?'badge-active':st==='expired'?'badge-expired':'badge-expiring';
     const daysLeft = c.amcEnd ? Math.max(0, daysBetween(todayStr(), c.amcEnd)) : null;
     const badgeText = st==='expiring'?`Expiring in ${daysLeft}d`:st.charAt(0).toUpperCase()+st.slice(1);
-    const pendingCount = (c.services||[]).filter(s => s.type==='complaint' && s.status!=='done').length;
+    const pendingCount = c.pendingComplaints || 0;
     return `<div class="customer-item ${selectedCustomerId===c.id?'active':''}" onclick="selectCustomer(${c.id})">
       <div class="c-name">${c.name}</div>
       <div class="c-meta">${c.phone?'📞 '+c.phone:''}</div>
@@ -552,15 +615,48 @@ function renderSidebar() {
         ${pendingCount?`<span class="c-badge badge-pending">🔴 ${pendingCount} Pending</span>`:''}
       </div>
     </div>`;
-  }).join('');
+  }).join('') + (overflow > 0 ? `<div class="no-data" style="font-size:11px;padding:10px;">+ ${overflow} more — refine your search</div>` : '');
 }
-document.addEventListener('input', e => { if (e.target.id==='searchInput') renderSidebar(); });
+document.addEventListener('input', e => {
+  if (e.target.id !== 'searchInput') return;
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(renderSidebar, 200); // debounce 200ms
+});
 
 // ── MAIN PANEL ─────────────────────────────────────────────────
-function selectCustomer(id) {
+async function selectCustomer(id) {
   selectedCustomerId = id;
-  renderSidebar(); renderMain();
+  renderSidebar();
   document.getElementById('mainContent').scrollTo(0,0);
+  await loadAndRenderCustomer(id);
+}
+
+// Load full customer data on demand, use cache if available
+async function loadAndRenderCustomer(id) {
+  const main = document.getElementById('mainContent');
+  if (fullCustomerCache[id]) {
+    renderMain(fullCustomerCache[id]);
+    return;
+  }
+  // Show skeleton while loading
+  main.innerHTML = `<div class="empty-state"><span class="spinner"></span><div style="color:var(--text-dim);margin-top:8px;">Loading customer...</div></div>`;
+  try {
+    const result = await apiCall('getCustomer', { customerId: id });
+    if (result.customer) {
+      fullCustomerCache[id] = result.customer;
+      // Also update the index entry's services so sidebar badges stay accurate
+      const idx = appData.customers.findIndex(c => c.id === id);
+      if (idx !== -1) {
+        const c = result.customer;
+        appData.customers[idx].pendingComplaints = (c.services||[]).filter(s=>s.type==='complaint'&&s.status!=='done').length;
+        appData.customers[idx].lastVisit = (c.services||[]).length
+          ? [...c.services].sort((a,b)=>new Date(b.date)-new Date(a.date))[0].date : null;
+      }
+      renderMain(result.customer);
+    }
+  } catch(e) {
+    main.innerHTML = `<div class="empty-state"><div style="color:var(--loss);">❌ Failed to load customer.<br><small>${e.message}</small></div></div>`;
+  }
 }
 
 // Builds the service/purchase table rows (shared between AMC + Regular)
@@ -599,8 +695,7 @@ function buildServiceRows(services, customerId, isRegular) {
   }).join('');
 }
 
-function renderMain() {
-  const c = appData.customers.find(x => x.id===selectedCustomerId);
+function renderMain(c) {
   const main = document.getElementById('mainContent');
   if (!c) { main.innerHTML = `<div class="empty-state"><div style="font-size:48px;opacity:0.3;">💧</div><div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;color:var(--text-mid);">Select a Customer</div></div>`; return; }
   if (c.customerType === 'regular') { renderRegularMain(c); return; }
@@ -800,7 +895,7 @@ function openAddRegularVisit(customerId) {
   openModal(serviceModalHtml({ customerId, isRegular: true, existing: null }));
 }
 function openEditService(customerId, serviceId) {
-  const c = appData.customers.find(x => x.id === customerId);
+  const c = fullCustomerCache[customerId] || appData.customers.find(x => x.id === customerId);
   const s = (c.services||[]).find(x => x.id === serviceId);
   const isRegular = c.customerType === 'regular';
   openModal(serviceModalHtml({ customerId, isRegular, existing: s }));
@@ -823,34 +918,36 @@ async function saveServiceEntry(customerId, existingId) {
     if (name) components.push({ name, price: Number(priceInputs[i]?.value || 0) });
   });
 
-  const c = appData.customers.find(x => x.id === customerId);
+  const c = fullCustomerCache[customerId] || appData.customers.find(x => x.id === customerId);
   const isEdit = !!existingId;
 
   if (isEdit) {
-    // Update in-place and save entire customer
     const idx = c.services.findIndex(s => s.id === existingId);
     c.services[idx] = { ...c.services[idx], date, type, status, notes, components };
     try {
       setSyncStatus('loading', '⏳ Saving...');
       await apiCall('saveCustomer', { customer: c });
+      fullCustomerCache[customerId] = c;
+      updateIndexEntry(c);
       setSyncStatus('ok', '✅ Synced');
       showToast('✅ Entry updated');
-      closeModal(); renderMain(); renderSidebar();
+      closeModal(); renderMain(c); renderSidebar();
     } catch(e) {
       setSyncStatus('err', '❌ Error'); showToast('Error: ' + e.message);
       btn.disabled = false; btn.textContent = 'Save Changes';
     }
   } else {
-    // New entry
     const service = { id: uid(), date, type, status, notes, components };
     try {
       setSyncStatus('loading', '⏳ Saving...');
       await apiCall('saveService', { customerId, service });
       if (!c.services) c.services = [];
       c.services.push(service);
+      fullCustomerCache[customerId] = c;
+      updateIndexEntry(c);
       setSyncStatus('ok', '✅ Synced');
       showToast('✅ Entry saved');
-      closeModal(); renderMain(); renderSidebar();
+      closeModal(); renderMain(c); renderSidebar();
     } catch(e) {
       setSyncStatus('err', '❌ Error'); showToast('Error: ' + e.message);
       btn.disabled = false; btn.textContent = 'Save';
@@ -870,12 +967,26 @@ async function deleteService(customerId, serviceId) {
   try {
     setSyncStatus('loading', '⏳ Deleting...');
     await apiCall('deleteService', { customerId, serviceId });
-    const c = appData.customers.find(x => x.id === customerId);
-    c.services = c.services.filter(s => s.id !== serviceId);
+    const c = fullCustomerCache[customerId];
+    if (c) {
+      c.services = c.services.filter(s => s.id !== serviceId);
+      updateIndexEntry(c);
+    }
     setSyncStatus('ok', '✅ Synced');
     showToast('Entry deleted');
-    renderMain(); renderSidebar();
+    renderMain(c); renderSidebar();
   } catch(e) { showToast('Error: ' + e.message); }
+}
+
+// Sync a full customer object back into the lightweight index
+function updateIndexEntry(c) {
+  const idx = appData.customers.findIndex(x => x.id === c.id);
+  if (idx === -1) return;
+  const svc = c.services || [];
+  appData.customers[idx].pendingComplaints = svc.filter(s=>s.type==='complaint'&&s.status!=='done').length;
+  appData.customers[idx].lastVisit = svc.length
+    ? [...svc].sort((a,b)=>new Date(b.date)-new Date(a.date))[0].date : null;
+  saveIndexToLS(appData);
 }
 
 // ── CUSTOMER MODALS ────────────────────────────────────────────
@@ -932,7 +1043,10 @@ function toggleCustomerType(type) {
 }
 
 function openAddCustomer() { openModal(customerForm(null)); }
-function openEditCustomer(id) { openModal(customerForm(appData.customers.find(x=>x.id===id))); }
+function openEditCustomer(id) {
+  const c = fullCustomerCache[id] || appData.customers.find(x=>x.id===id);
+  openModal(customerForm(c));
+}
 
 async function saveCustomer(id) {
   const name = document.getElementById('f_name').value.trim();
@@ -958,11 +1072,33 @@ async function saveCustomer(id) {
   try {
     setSyncStatus('loading', '⏳ Saving...');
     await apiCall('saveCustomer', { customer });
-    if (isNew) { appData.customers.push(customer); appData.nextId++; selectedCustomerId = customerId; }
-    else { const idx = appData.customers.findIndex(c=>c.id===id); appData.customers[idx] = customer; }
+    fullCustomerCache[customerId] = customer;
+    if (isNew) {
+      // Add a lightweight index entry
+      appData.customers.push({
+        id: customerId, name: customer.name, phone: customer.phone,
+        address: customer.address, customerType: customer.customerType,
+        amcEnd: customer.amcEnd, amcStart: customer.amcStart,
+        amcAmount: customer.amcAmount, roModel: customer.roModel,
+        notes: customer.notes, pendingComplaints: 0, lastVisit: null
+      });
+      appData.nextId++;
+      selectedCustomerId = customerId;
+    } else {
+      // Update index entry
+      const idx = appData.customers.findIndex(c=>c.id===id);
+      if (idx !== -1) Object.assign(appData.customers[idx], {
+        name: customer.name, phone: customer.phone, address: customer.address,
+        customerType: customer.customerType, amcEnd: customer.amcEnd,
+        amcStart: customer.amcStart, amcAmount: customer.amcAmount,
+        roModel: customer.roModel, notes: customer.notes
+      });
+    }
+    saveIndexToLS(appData);
     setSyncStatus('ok', '✅ Synced');
     showToast(isNew ? '✅ Customer added' : '✅ Customer updated');
-    closeModal(); renderSidebar(); renderMain(); renderReminderBanner();
+    closeModal(); renderSidebar(); renderReminderBanner();
+    if (selectedCustomerId === customerId) renderMain(customer);
   } catch(e) {
     setSyncStatus('err', '❌ Error'); showToast('Error: ' + e.message);
     btn.disabled = false; btn.textContent = isNew ? 'Add Customer' : 'Save Changes';
@@ -975,9 +1111,11 @@ async function deleteCustomer(id) {
     setSyncStatus('loading', '⏳ Deleting...');
     await apiCall('deleteCustomer', { customerId: id });
     appData.customers = appData.customers.filter(c => c.id !== id);
+    delete fullCustomerCache[id];
+    saveIndexToLS(appData);
     selectedCustomerId = null;
     setSyncStatus('ok', '✅ Synced'); showToast('Customer deleted');
-    renderSidebar(); renderMain(); renderReminderBanner();
+    renderSidebar(); renderMain(null); renderReminderBanner();
   } catch(e) { showToast('Error: ' + e.message); }
 }
 </script>
