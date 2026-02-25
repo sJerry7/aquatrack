@@ -1,3 +1,5 @@
+// Only the Script URL lives here — credentials are in Apps Script
+//const SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbyJSlFjOamrcALcwCCHzUJhKTDOapI9WNovkRxUmeqbzWjb9p8eYDLlUibm_DZ-3MiM/exec'; // ← Paste your Web App URL
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -32,7 +34,6 @@
   .connect-btn { width:100%; margin-top:14px; background:var(--accent); color:#000; border:none; border-radius:8px; padding:12px; font-family:'Syne',sans-serif; font-weight:700; font-size:14px; cursor:pointer; }
   .connect-btn:disabled { opacity:0.6; cursor:not-allowed; }
 
-  
   /* LAYOUT */
   #appShell { display:none; }
   header { background:linear-gradient(135deg,#0a0f1e,#0d1a2e); border-bottom:1px solid var(--border); padding:14px 24px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:100; }
@@ -186,6 +187,24 @@
   .toast { position:fixed; bottom:24px; right:24px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px 18px; font-size:13px; z-index:999; box-shadow:0 8px 30px rgba(0,0,0,.4); animation:slideUp 0.3s ease; }
   @keyframes slideUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
   @keyframes shake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-8px)} 40%{transform:translateX(8px)} 60%{transform:translateX(-5px)} 80%{transform:translateX(5px)} }
+
+  /* TRASH / RECYCLE BIN */
+  .filter-tab.trash { color:var(--text-dim); }
+  .filter-tab.active.trash { color:var(--loss); }
+  .trash-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:8px; color:var(--text-dim); font-size:13px; }
+  .trash-item { padding:13px 16px; border-bottom:1px solid var(--border); }
+  .trash-item .c-name { font-family:'Syne',sans-serif; font-weight:600; font-size:14px; color:var(--text-mid); }
+  .trash-item .c-meta { font-size:12px; color:var(--text-dim); margin-top:3px; }
+  .trash-item .trash-actions { display:flex; gap:6px; margin-top:8px; }
+  .purge-days { font-size:10px; color:var(--loss); font-weight:700; margin-top:4px; }
+  .trash-main { padding:24px; }
+  .trash-main h2 { font-family:'Syne',sans-serif; font-weight:800; font-size:22px; margin-bottom:6px; color:var(--loss); }
+  .trash-main p { color:var(--text-mid); font-size:13px; margin-bottom:24px; }
+  .trash-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:18px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  .trash-card-info h3 { font-family:'Syne',sans-serif; font-weight:700; font-size:16px; color:var(--text-mid); }
+  .trash-card-info p { font-size:12px; color:var(--text-dim); margin-top:4px; }
+  .trash-card-info .purge-countdown { font-size:11px; margin-top:6px; color:var(--loss); font-weight:600; }
+  .trash-card-actions { display:flex; gap:8px; flex-wrap:wrap; }
   ::-webkit-scrollbar { width:5px; }
   ::-webkit-scrollbar-track { background:var(--surface); }
   ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
@@ -299,6 +318,7 @@
           <button class="filter-tab active all" onclick="setFilter('all',this)">All</button>
           <button class="filter-tab amc" onclick="setFilter('amc',this)">🔵 AMC</button>
           <button class="filter-tab regular" onclick="setFilter('regular',this)">🟢 Regular</button>
+          <button class="filter-tab trash" onclick="setFilter('trash',this)">🗑️</button>
         </div>
       </div>
       <div class="customer-list" id="customerList">
@@ -325,12 +345,13 @@
 const SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbyJSlFjOamrcALcwCCHzUJhKTDOapI9WNovkRxUmeqbzWjb9p8eYDLlUibm_DZ-3MiM/exec'; // ← Paste your Web App URL
 const TOKEN_KEY   = 'aquatrack_token';
 const TOKEN_EXP   = 'aquatrack_token_exp';
-const TEST_VAL   = '';
+
 // ── STATE ──────────────────────────────────────────────────────
 // appData.customers = lightweight index only (name, phone, amcEnd, etc.)
 // fullCustomerCache = { [id]: fullCustomerObject } — loaded on demand
 let appData = { customers: [], nextId: 1 };
 let fullCustomerCache = {};         // in-memory cache of full customer data
+let trashData = [];                 // deleted customers
 let selectedCustomerId = null;
 let activeFilter = 'all';
 let searchDebounceTimer = null;
@@ -449,6 +470,7 @@ async function doLogout() {
   localStorage.removeItem(LS_INDEX_TS);
   appData = { customers:[], nextId:1 };
   fullCustomerCache = {};
+  trashData = [];
   selectedCustomerId = null;
   document.getElementById('appShell').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
@@ -467,8 +489,12 @@ function setFilter(type, btn) {
   document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
   btn.classList.add('active');
   selectedCustomerId = null;
-  renderSidebar();
-  document.getElementById('mainContent').innerHTML = `<div class="empty-state"><div style="font-size:48px;opacity:0.3;">💧</div><div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;color:var(--text-mid);">Select a Customer</div></div>`;
+  if (type === 'trash') {
+    loadTrash();
+  } else {
+    renderSidebar();
+    document.getElementById('mainContent').innerHTML = `<div class="empty-state"><div style="font-size:48px;opacity:0.3;">💧</div><div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;color:var(--text-mid);">Select a Customer</div></div>`;
+  }
 }
 
 // Fetch lightweight index only (fast even with 4000 customers)
@@ -1107,16 +1133,122 @@ async function saveCustomer(id) {
 }
 
 async function deleteCustomer(id) {
-  if (!confirm('Delete this customer?')) return;
+  if (!confirm('Move this customer to Trash? They will be permanently deleted after 7 days.')) return;
   try {
-    setSyncStatus('loading', '⏳ Deleting...');
+    setSyncStatus('loading', '⏳ Moving to trash...');
     await apiCall('deleteCustomer', { customerId: id });
     appData.customers = appData.customers.filter(c => c.id !== id);
     delete fullCustomerCache[id];
     saveIndexToLS(appData);
     selectedCustomerId = null;
-    setSyncStatus('ok', '✅ Synced'); showToast('Customer deleted');
+    setSyncStatus('ok', '✅ Synced');
+    showToast('🗑️ Customer moved to Trash — restorable for 7 days');
     renderSidebar(); renderMain(null); renderReminderBanner();
+  } catch(e) { showToast('Error: ' + e.message); }
+}
+
+// ── TRASH FUNCTIONS ────────────────────────────────────────────
+async function loadTrash() {
+  const list = document.getElementById('customerList');
+  const main = document.getElementById('mainContent');
+  list.innerHTML = `<div class="no-data"><span class="spinner"></span> Loading...</div>`;
+  main.innerHTML = `<div class="trash-main">
+    <h2>🗑️ Recycle Bin</h2>
+    <p>Deleted customers are kept for 7 days then permanently removed.<br>Select a customer from the sidebar to restore or delete permanently.</p>
+    <div style="color:var(--text-dim);font-size:13px;text-align:center;margin-top:40px;opacity:0.5;">← Select from sidebar</div>
+  </div>`;
+  try {
+    const result = await apiCall('getTrash');
+    trashData = result.deleted || [];
+    renderTrashSidebar();
+  } catch(e) {
+    list.innerHTML = `<div class="no-data" style="color:var(--loss);">Failed to load trash</div>`;
+  }
+}
+
+function renderTrashSidebar() {
+  const list = document.getElementById('customerList');
+  if (!trashData.length) {
+    list.innerHTML = `<div class="trash-empty"><div style="font-size:32px;">✅</div><div>Recycle bin is empty</div></div>`;
+    return;
+  }
+  list.innerHTML = trashData.map(c => {
+    const typeLabel = c.customerType === 'regular' ? '🟢 Regular' : '🔵 AMC';
+    const daysText = c.daysUntilPurge === 0
+      ? `<div class="purge-days">⚠️ Deletes today</div>`
+      : `<div class="purge-days">🗑️ Auto-deletes in ${c.daysUntilPurge}d</div>`;
+    return `<div class="trash-item" onclick="showTrashDetail(${c.id})">
+      <div class="c-name">${c.name}</div>
+      <div class="c-meta">${c.phone ? '📞 ' + c.phone : ''}</div>
+      <div class="c-badges" style="margin-top:5px;">
+        <span class="c-badge" style="background:rgba(148,163,184,.1);color:var(--text-dim);">${typeLabel}</span>
+      </div>
+      ${daysText}
+    </div>`;
+  }).join('');
+}
+
+function showTrashDetail(id) {
+  const c = trashData.find(x => x.id === id);
+  if (!c) return;
+  const main = document.getElementById('mainContent');
+  const deletedDate = new Date(c.deletedAt).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'});
+  const purgeDate   = new Date(new Date(c.deletedAt).getTime() + 7*86400000).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'});
+  main.innerHTML = `
+    <div class="trash-main">
+      <h2>🗑️ ${c.name}</h2>
+      <p>${c.phone ? '📞 ' + c.phone + ' &nbsp;' : ''}${c.roModel ? '🔧 ' + c.roModel : ''}</p>
+      <div style="background:rgba(248,113,113,.07);border:1px solid rgba(248,113,113,.2);border-radius:10px;padding:14px 18px;margin-bottom:24px;">
+        <div style="font-size:13px;color:var(--text-mid);">🗑️ Deleted on <strong style="color:var(--text);">${deletedDate}</strong></div>
+        <div style="font-size:13px;color:var(--loss);margin-top:6px;font-weight:600;">
+          ${c.daysUntilPurge === 0 ? '⚠️ Will be permanently deleted today' : `⏳ Permanently deleted on <strong>${purgeDate}</strong> (${c.daysUntilPurge} days left)`}
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+        <button class="btn btn-accent" style="font-size:14px;padding:10px 20px;" onclick="restoreCustomer(${c.id})">
+          ♻️ Restore Customer
+        </button>
+        <button class="btn btn-danger" style="font-size:14px;padding:10px 20px;" onclick="purgeCustomer(${c.id})">
+          🗑️ Delete Permanently
+        </button>
+      </div>
+      <p style="color:var(--text-dim);font-size:12px;margin-top:16px;">
+        Restoring will bring back the customer and <strong>all their service history</strong> exactly as it was.
+      </p>
+    </div>`;
+}
+
+async function restoreCustomer(id) {
+  if (!confirm('Restore this customer back to the active list?')) return;
+  try {
+    setSyncStatus('loading', '⏳ Restoring...');
+    await apiCall('restoreCustomer', { customerId: id });
+    trashData = trashData.filter(c => c.id !== id);
+    // Force index refresh so restored customer appears in sidebar
+    await refreshIndex(true);
+    setSyncStatus('ok', '✅ Synced');
+    showToast('✅ Customer restored successfully!');
+    renderTrashSidebar();
+    document.getElementById('mainContent').innerHTML = `<div class="trash-main">
+      <h2>🗑️ Recycle Bin</h2>
+      <p>Customer has been restored. Switch to All / AMC / Regular tab to find them.</p>
+    </div>`;
+  } catch(e) { showToast('Error: ' + e.message); }
+}
+
+async function purgeCustomer(id) {
+  if (!confirm('Permanently delete this customer? This CANNOT be undone.')) return;
+  try {
+    setSyncStatus('loading', '⏳ Deleting...');
+    await apiCall('purgeCustomer', { customerId: id });
+    trashData = trashData.filter(c => c.id !== id);
+    setSyncStatus('ok', '✅ Synced');
+    showToast('🗑️ Customer permanently deleted');
+    renderTrashSidebar();
+    document.getElementById('mainContent').innerHTML = `<div class="trash-main">
+      <h2>🗑️ Recycle Bin</h2>
+      <p>Deleted customers are kept for 7 days then permanently removed.</p>
+    </div>`;
   } catch(e) { showToast('Error: ' + e.message); }
 }
 </script>
